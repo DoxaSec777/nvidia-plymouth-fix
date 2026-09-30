@@ -1,0 +1,75 @@
+#!/bin/sh
+# Wait until the proprietary NVIDIA DRM card has a usable /dev node.
+# Plymouth otherwise may try an early udev event, fail to open the card,
+# and permanently fall back to its text renderer for the rest of the boot.
+
+CONFIG_FILE=${NPRF_CONFIG_FILE:-/etc/default/nvidia-plymouth-race-fix}
+if [ -r "$CONFIG_FILE" ]; then
+    # The installed file contains only numeric assignments created by install.sh.
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+TIMEOUT_VALUE=${NPRF_TIMEOUT:-${TIMEOUT:-8}}
+case "$TIMEOUT_VALUE" in
+    ''|*[!0-9]*) TIMEOUT_VALUE=8 ;;
+esac
+if [ "$TIMEOUT_VALUE" -gt 120 ]; then
+    TIMEOUT_VALUE=120
+fi
+
+DEV_ROOT=${NPRF_DEV_ROOT:-/dev}
+SYS_ROOT=${NPRF_SYS_ROOT:-/sys}
+RUN_ROOT=${NPRF_RUN_ROOT:-/run}
+UPTIME_FILE=${NPRF_UPTIME_FILE:-/proc/uptime}
+UDEVADM=${NPRF_UDEVADM:-udevadm}
+SLEEP=${NPRF_SLEEP:-sleep}
+ALLOW_REGULAR=${NPRF_TEST_ALLOW_REGULAR:-0}
+MARKER_DIR="$RUN_ROOT/nvidia-plymouth-race-fix"
+
+write_status() {
+    status=$1
+    mkdir -p "$MARKER_DIR" || return 0
+    printf '%s\n' "$status" > "$MARKER_DIR/nvidia-drm-wait-status" 2>/dev/null || true
+}
+
+write_ready_marker() {
+    status=$1
+    write_status "$status"
+    if [ -r "$UPTIME_FILE" ]; then
+        IFS=' ' read -r uptime_value _rest < "$UPTIME_FILE" || uptime_value=0
+    else
+        uptime_value=0
+    fi
+    printf '%s\n' "$uptime_value" > "$MARKER_DIR/graphics-ready" 2>/dev/null || true
+}
+
+is_usable_node() {
+    node=$1
+    if [ -c "$node" ]; then
+        return 0
+    fi
+    [ "$ALLOW_REGULAR" = 1 ] && [ -e "$node" ]
+}
+
+attempts=$((TIMEOUT_VALUE * 20))
+i=0
+while [ "$i" -lt "$attempts" ]; do
+    for node in "$DEV_ROOT"/dri/card[0-9]*; do
+        is_usable_node "$node" || continue
+        card=${node##*/}
+        driver=$(readlink -f "$SYS_ROOT/class/drm/$card/device/driver" 2>/dev/null) || driver=
+        [ "${driver##*/}" = nvidia ] || continue
+        if "$UDEVADM" info --query=property --name="$node" >/dev/null 2>&1; then
+            write_ready_marker "ready:$card"
+            exit 0
+        fi
+    done
+    "$SLEEP" 0.05
+    i=$((i + 1))
+done
+
+# Timeout is deliberately non-fatal: boot must remain possible even if the
+# NVIDIA driver fails. Plymouth can still choose another renderer or text mode.
+write_status timeout
+exit 0

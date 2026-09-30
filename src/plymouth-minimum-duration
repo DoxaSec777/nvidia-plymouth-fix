@@ -1,0 +1,48 @@
+#!/bin/sh
+# Keep Plymouth visible for MIN_DURATION seconds after NVIDIA DRM becomes usable.
+
+CONFIG_FILE=${NPRF_CONFIG_FILE:-/etc/default/nvidia-plymouth-race-fix}
+if [ -r "$CONFIG_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$CONFIG_FILE"
+fi
+
+DURATION=${NPRF_MIN_DURATION:-${MIN_DURATION:-0}}
+case "$DURATION" in
+    ''|*[!0-9]*) DURATION=0 ;;
+esac
+[ "$DURATION" -gt 0 ] || exit 0
+
+RUN_ROOT=${NPRF_RUN_ROOT:-/run}
+UPTIME_FILE=${NPRF_UPTIME_FILE:-/proc/uptime}
+SLEEP=${NPRF_SLEEP:-sleep}
+PLYMOUTH=${NPRF_PLYMOUTH:-plymouth}
+MARKER_DIR="$RUN_ROOT/nvidia-plymouth-race-fix"
+
+status=
+if [ -r "$MARKER_DIR/nvidia-drm-wait-status" ]; then
+    IFS=' ' read -r status _rest < "$MARKER_DIR/nvidia-drm-wait-status" || status=
+fi
+case "$status" in
+    ready:*) ;;
+    *) exit 0 ;;
+esac
+
+start=
+if [ -r "$MARKER_DIR/graphics-ready" ]; then
+    IFS=' ' read -r start _rest < "$MARKER_DIR/graphics-ready" || start=
+fi
+[ -n "$start" ] || exit 0
+
+if "$PLYMOUTH" --ping >/dev/null 2>&1; then
+    "$PLYMOUTH" show-splash >/dev/null 2>&1 || true
+else
+    exit 0
+fi
+
+IFS=' ' read -r now _rest < "$UPTIME_FILE" || exit 0
+remaining=$(awk -v duration="$DURATION" -v start="$start" -v now="$now" 'BEGIN { value=duration-(now-start); if (value>0) printf "%.3f", value; else print "0" }')
+case "$remaining" in
+    0|0.0|0.00|0.000) exit 0 ;;
+esac
+"$SLEEP" "$remaining"

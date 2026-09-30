@@ -1,0 +1,40 @@
+#!/bin/sh
+set -e
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "${1:-}" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+FORCE_LOAD=0
+if [ -r /etc/default/nvidia-plymouth-race-fix ]; then
+    # The installer creates numeric assignments only.
+    # shellcheck disable=SC1091
+    . /etc/default/nvidia-plymouth-race-fix
+fi
+
+if [ "${FORCE_LOAD:-0}" = 1 ]; then
+    force_load nvidia || true
+    force_load nvidia_modeset || true
+    force_load nvidia_drm || true
+else
+    manual_add_modules nvidia || true
+    manual_add_modules nvidia_modeset || true
+    manual_add_modules nvidia_drm || true
+fi
+
+for command_name in readlink sleep udevadm; do
+    command_path=$(command -v "$command_name" 2>/dev/null || true)
+    [ -n "$command_path" ] || continue
+    copy_exec "$command_path"
+done
+
+mkdir -p "$DESTDIR/usr/local/libexec"
+cp -a /usr/local/libexec/plymouth-wait-for-nvidia-drm "$DESTDIR/usr/local/libexec/plymouth-wait-for-nvidia-drm"
+mkdir -p "$DESTDIR/etc/default"
+cp -a /etc/default/nvidia-plymouth-race-fix "$DESTDIR/etc/default/nvidia-plymouth-race-fix"
+mkdir -p "$DESTDIR/etc/systemd/system/plymouth-start.service.d"
+cp -a /etc/systemd/system/plymouth-start.service.d/10-wait-for-nvidia-drm.conf "$DESTDIR/etc/systemd/system/plymouth-start.service.d/10-wait-for-nvidia-drm.conf"

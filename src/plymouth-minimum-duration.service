@@ -1,0 +1,14 @@
+[Unit]
+Description=Keep Plymouth visible for the configured minimum duration
+After=plymouth-start.service
+Before=plymouth-quit.service plymouth-quit-wait.service display-manager.service
+ConditionKernelCommandLine=splash
+ConditionPathExists=/run/plymouth/pid
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/plymouth-minimum-duration
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+#!/bin/sh
+
+PREREQ="udev"
+prereqs() { echo "$PREREQ"; }
+case "${1:-}" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+# The hook embeds the NVIDIA modules. Udev performs normal hardware-driven
+# loading; this script only delays Plymouth until the resulting node is usable.
+/usr/local/libexec/plymouth-wait-for-nvidia-drm || true
